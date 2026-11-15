@@ -8,7 +8,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
 {
   public void Configure(EntityTypeBuilder<User> b)
   {
-    b.ToTable(t => t.HasCheckConstraint("CK_Users_Status", "[Status] IN ('ACTIVE', 'SUSPENDED)"));
+    b.ToTable(t => t.HasCheckConstraint("CK_Users_Status", "[Status] IN ('ACTIVE', 'SUSPENDED')"));
     
     b.Property(u => u.Username).IsRequired().HasMaxLength(50);
     b.Property(u => u.FullName).IsRequired().HasMaxLength(100);
