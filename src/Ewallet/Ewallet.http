@@ -1,0 +1,108 @@
+### E-Wallet Week 6 — REST Client (VS Code "REST Client" / Rider / Visual Studio)
+### Jalankan dulu: dotnet run --project src/Ewallet (Development)
+@base = http://localhost:5000/api
+
+### ---------- Payment methods ----------
+GET {{base}}/payment-methods
+
+### ---------- Users ----------
+GET {{base}}/users
+
+###
+GET {{base}}/users/1
+
+### Create user -> otomatis wallet ACTIVE saldo Rp0
+POST {{base}}/users
+Content-Type: application/json
+
+{ "username": "joko_w", "fullName": "Joko W", "email": "joko@example.com", "phone": "081299990000" }
+
+### Update user
+PUT {{base}}/users/1
+Content-Type: application/json
+
+{ "fullName": "Budi Santoso", "email": "budi@example.com", "phone": "081200000001" }
+
+### ---------- Wallet ----------
+# Saldo SEBELUM transaksi (catat rowVersion)
+GET {{base}}/wallets/7
+
+### ---------- Top up ----------
+# 1) Request: TopUpRequest + Transaction PENDING, saldo belum berubah
+# @name topup
+POST {{base}}/topups
+Content-Type: application/json
+
+{ "walletId": 7, "paymentMethodId": 2, "amount": 200000 }
+
+### 2) Konfirmasi (Development/Testing saja): PAID + SUCCESS + mutasi IN + audit TOPUP_PAID
+POST {{base}}/topups/{{topup.response.body.id}}/confirm
+
+### 3) Konfirmasi ulang -> 409 (tidak boleh diproses ulang)
+POST {{base}}/topups/{{topup.response.body.id}}/confirm
+
+### Saldo SESUDAH top up
+GET {{base}}/wallets/7
+
+### ---------- Transfer ----------
+# Sukses: 1 Transaction + 2 WalletMutations
+POST {{base}}/transfers
+Content-Type: application/json
+
+{ "senderWalletId": 7, "receiverWalletNumber": "EW1000000008", "amount": 50000, "description": "bayar makan" }
+
+### Ditolak: saldo tidak cukup -> 400 + audit TRANSFER_REJECTED
+POST {{base}}/transfers
+Content-Type: application/json
+
+{ "senderWalletId": 8, "receiverWalletNumber": "EW1000000007", "amount": 99999999 }
+
+### Ditolak: transfer ke wallet sendiri -> 400
+POST {{base}}/transfers
+Content-Type: application/json
+
+{ "senderWalletId": 8, "receiverWalletNumber": "EW1000000008", "amount": 1000 }
+
+### ---------- Rollback ----------
+# Gagal setelah saldo & mutasi ditulis, sebelum commit -> 500, saldo kedua wallet TIDAK berubah
+POST {{base}}/transfers?simulateFailure=true
+Content-Type: application/json
+
+{ "senderWalletId": 1, "receiverWalletNumber": "EW1000000002", "amount": 10000 }
+
+### ---------- Concurrency (RowVersion) ----------
+# 1) Ambil rowVersion wallet 1
+GET {{base}}/wallets/1
+
+### 2) Ubah saldo wallet 1 (rowVersion di DB berubah)
+POST {{base}}/transfers
+Content-Type: application/json
+
+{ "senderWalletId": 1, "receiverWalletNumber": "EW1000000002", "amount": 1000 }
+
+### 3) Kirim dengan rowVersion LAMA dari langkah 1 -> 409 Conflict, tidak ada perubahan
+POST {{base}}/transfers
+Content-Type: application/json
+
+{ "senderWalletId": 1, "receiverWalletNumber": "EW1000000002", "amount": 1000, "senderRowVersion": "GANTI_DENGAN_ROWVERSION_LANGKAH_1" }
+
+### ---------- History (LINQ: search, filter, sort, pagination) ----------
+GET {{base}}/wallets/1/transactions?page=1&pageSize=2
+
+###
+GET {{base}}/wallets/1/transactions?type=TRANSFER&direction=OUT&sortBy=amount&sortDir=desc
+
+###
+GET {{base}}/wallets/1/transactions?search=TOP-SEED&status=SUCCESS&from=2026-11-01&to=2026-11-30
+
+###
+GET {{base}}/wallets/7/mutations?direction=IN&page=1&pageSize=5
+
+### ---------- Audit logs ----------
+GET {{base}}/audit-logs?page=1&pageSize=10
+
+###
+GET {{base}}/audit-logs?action=TRANSFER_REJECTED
+
+###
+GET {{base}}/audit-logs?outcome=SUCCESS&actorUserId=1

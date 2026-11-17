@@ -10,7 +10,7 @@ public class TopUpRequest
   public TopUpStatus Status{get; set;}
   public string? ProviderReference {get; set;}
   public DateTime CreatedAtUtc {get; set;}
-  public DateTime? ExpiredAtUtc {get; set;}
+  public DateTime? ExpiresAtUtc {get; set;}
   public DateTime? PaidAtUtc {get; set;}
 
   public Transaction Transaction {get; set; } = null!;

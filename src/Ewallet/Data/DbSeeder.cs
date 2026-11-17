@@ -3,11 +3,14 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Ewallet.Data;
 
-public static class Seeder
+public static class DbSeeder
 {
   public static async Task SeedAsync(AppDbContext db)
   {
     if(await db.Users.AnyAsync()) return;
+
+    await using var dbTx = await db.Database.BeginTransactionAsync();
+    var audits = new List<Func<AuditLog>>();   // built after the first save, when Ids exist
 
     var now = DateTime.UtcNow;
     var clock = now.AddDays(-7);
@@ -91,7 +94,7 @@ public static class Seeder
         };
         db.Transactions.Add(trx);
 
-        db.TopUpRequests.Add(new TopUpRequest
+        var topUp = new TopUpRequest
         {
             Transaction = trx,
             Wallet = w,
@@ -100,11 +103,20 @@ public static class Seeder
             Status = paid ? TopUpStatus.Paid : TopUpStatus.Pending,
             ProviderReference = $"SIM-{n:D4}",
             CreatedAtUtc = created,
-            ExpiredAtUtc = paid ? created.AddHours(24) : now.AddHours(24),
+            ExpiresAtUtc = paid ? created.AddHours(24) : now.AddHours(24),
             PaidAtUtc = paid ? done : null,
-        });
+        };
+        db.TopUpRequests.Add(topUp);
 
-        if (paid) Apply(trx, w, MutationDirection.In, done);   // a PENDING top-up must not touch the balance
+        audits.Add(() => Audit(AuditActions.TopUpRequested, nameof(TopUpRequest), topUp.Id, w.UserId, trx, created,
+            $"Top up {trx.ReferenceNo} sebesar {Rp(amount)} via {pm.Code} menunggu pembayaran."));
+
+        if (paid)
+        {
+            Apply(trx, w, MutationDirection.In, done);   // a PENDING top-up must not touch the balance
+            audits.Add(() => Audit(AuditActions.TopUpPaid, nameof(TopUpRequest), topUp.Id, w.UserId, trx, done,
+                $"Top up {trx.ReferenceNo} sebesar {Rp(amount)} berhasil dibayar."));
+        }
     }
 
     void Transfer(Wallet from, Wallet to, decimal amount)
@@ -126,7 +138,17 @@ public static class Seeder
 
         Apply(trx, from, MutationDirection.Out, created);      // one transaction, two mutations
         Apply(trx, to, MutationDirection.In, created);
+        audits.Add(() => Audit(AuditActions.TransferCreated, nameof(Transaction), trx.Id, from.UserId, trx, created,
+            $"Transfer {trx.ReferenceNo} sebesar {Rp(amount)} dari {from.WalletNumber} ke {to.WalletNumber}."));
     }
+
+    static string Rp(decimal v) => Ewallet.Utils.CurrencyFormatter.Rupiah(v);
+
+    static AuditLog Audit(string action, string entityType, long entityId, long userId, Transaction trx, DateTime at, string desc) => new()
+    {
+        Action = action, EntityType = entityType, EntityId = entityId.ToString(), ActorUserId = userId,
+        TransactionId = trx.Id, Outcome = AuditOutcome.Success, Description = desc, CorrelationId = "seed", CreatedAtUtc = at,
+    };
 
     // ---- sample activity ----
     TopUp(wallets[0], 500_000m, bank, paid: true);
@@ -143,6 +165,10 @@ public static class Seeder
     Transfer(wallets[4], wallets[0], 200_000m);
     Transfer(wallets[1], wallets[5], 75_000m);
 
-    await db.SaveChangesAsync();  
+    await db.SaveChangesAsync();
+
+    db.AuditLogs.AddRange(audits.Select(a => a()));
+    await db.SaveChangesAsync();
+    await dbTx.CommitAsync();
   }
 }

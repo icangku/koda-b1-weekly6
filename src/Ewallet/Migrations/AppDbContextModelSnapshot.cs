@@ -131,7 +131,7 @@ namespace Ewallet.Console.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
 
-                    b.Property<DateTime?>("ExpiredAtUtc")
+                    b.Property<DateTime?>("ExpiresAtUtc")
                         .HasColumnType("datetime2");
 
                     b.Property<DateTime?>("PaidAtUtc")

@@ -12,16 +12,17 @@ public class WalletConfiguration : IEntityTypeConfiguration<Wallet>
     {
       t.HasCheckConstraint("CK_Wallets_Balance", "[Balance] >= 0");
       t.HasCheckConstraint("CK_Wallets_Status", "[Status] IN ('ACTIVE', 'FROZEN', 'CLOSED')");
-
-      b.Property(w => w.WalletNumber).IsRequired().HasMaxLength(30);
-      b.Property(w => w.RowVersion).IsRowVersion();
-
-      b.HasIndex(w => w.WalletNumber).IsUnique();
-
-      b.HasOne(w => w.User)
-        .WithOne(u => u.Wallet)
-        .HasForeignKey<Wallet>(w => w.UserId)
-        .OnDelete(DeleteBehavior.Restrict);
     });
+
+    b.Property(w => w.WalletNumber).IsRequired().HasMaxLength(30);
+    b.Property(w => w.RowVersion).IsRowVersion();   // concurrency token: UPDATE ... WHERE RowVersion = @original
+
+    b.HasIndex(w => w.WalletNumber).IsUnique();
+
+    // one user -> one wallet; EF creates a UNIQUE index on Wallets.UserId
+    b.HasOne(w => w.User)
+      .WithOne(u => u.Wallet)
+      .HasForeignKey<Wallet>(w => w.UserId)
+      .OnDelete(DeleteBehavior.Restrict);
   }
 }

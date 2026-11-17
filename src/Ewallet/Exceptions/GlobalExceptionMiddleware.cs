@@ -1,47 +1,49 @@
 using System.Net;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 
 namespace Ewallet.Exceptions;
 
-public class GlobalExceptionMiddleware
+public class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExceptionMiddleware> logger)
 {
-    private readonly RequestDelegate _next;
+	public async Task Invoke(HttpContext context)
+	{
+		try
+		{
+			await next(context);
+		}
+		catch (Exception ex) when (context.Request.Path.StartsWithSegments("/api") && !context.Response.HasStarted)
+		{
+			await HandleApiExceptionAsync(context, ex);
+		}
+	}
 
-    public GlobalExceptionMiddleware(RequestDelegate next) => _next = next;
+	private Task HandleApiExceptionAsync(HttpContext context, Exception ex)
+	{
+		var statusCode = ex switch
+		{
+			WalletNotFoundException or UserNotFoundException or PaymentMethodNotFoundException or TopUpNotFoundException
+				=> HttpStatusCode.NotFound,
+			ConflictException or DbUpdateConcurrencyException => HttpStatusCode.Conflict,
+			WalletException => HttpStatusCode.BadRequest,
+			DbUpdateException => HttpStatusCode.Conflict,              // constraint / unique violation
+			_ => HttpStatusCode.InternalServerError
+		};
 
-    public async Task Invoke(HttpContext context)
-    {
-        try
-        {
-            await _next(context);
-        }
-        catch (Exception ex)
-        {
-            if (context.Request.Path.StartsWithSegments("/api"))
-            {
-                await HandleApiExceptionAsync(context, ex);
-            }
-            else
-            {
-                throw;
-            }
-        }
-    }
+		var message = ex switch
+		{
+			WalletException or SimulatedFailureException => ex.Message,
+			DbUpdateConcurrencyException => "Data wallet telah diubah oleh proses lain. Tidak ada perubahan yang disimpan, silakan coba lagi.",
+			DbUpdateException => "Perubahan ditolak oleh constraint database. Tidak ada perubahan yang disimpan.",
+			_ => "Terjadi kesalahan pada server."
+		};
 
-    private static Task HandleApiExceptionAsync(HttpContext context, Exception ex)
-    {
-        context.Response.ContentType = "application/json";
-        
-        var statusCode = ex switch
-        {
-            WalletNotFoundException or UserNotFoundException => HttpStatusCode.NotFound,
-            InsufficientBalanceException or InvalidAmountException or SelfTransferException => HttpStatusCode.BadRequest,
-            _ => HttpStatusCode.InternalServerError
-        };
+		if ((int)statusCode >= 500) logger.LogError(ex, "Unhandled exception");
+		else logger.LogInformation("Request rejected ({Status}): {Message}", (int)statusCode, message);
 
-        context.Response.StatusCode = (int)statusCode;
-        var response = new { status = context.Response.StatusCode, error = ex.Message };
-
-        return context.Response.WriteAsync(JsonSerializer.Serialize(response));
-    }
+		context.Response.ContentType = "application/json";
+		context.Response.StatusCode = (int)statusCode;
+		var response = new { status = context.Response.StatusCode, error = message, correlationId = context.TraceIdentifier };
+		return context.Response.WriteAsync(JsonSerializer.Serialize(response));
+	}
 }
